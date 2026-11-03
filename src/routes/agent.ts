@@ -22,7 +22,7 @@ router.post('/chat', async (req, res, next) => {
       res.status(400).json({ error: 'goal is required' });
       return;
     }
-
+ 
     // Create session record
     const session = await Session.create({
       userId: req.userId,
