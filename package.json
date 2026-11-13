@@ -6,17 +6,22 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "test": "node --import tsx --test tests/unit.test.ts tests/middleware.test.ts tests/payment-services.test.ts tests/vendor-purchase.test.ts tests/mongo-index-migration.test.ts tests/agent-intents.test.ts",
+    "db:drop-legacy-api-key-index": "node --import tsx scripts/drop-legacy-api-key-index.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {
     "@google/genai": "^2.31.0",
+    "@privy-io/node": "^0.37.0",
     "cors": "^2.8.5",
     "dotenv": "^18.0.9",
     "express": "^5.3.0",
+    "express-rate-limit": "^8.7.3",
     "helmet": "^8.0.0",
     "mongoose": "^8.15.0",
     "morgan": "^1.10.0",
     "uuid": "^11.1.0",
+    "viem": "^2.57.16",
     "zod": "^3.25.0"
   },
   "devDependencies": {

@@ -11,12 +11,22 @@ import agentRoutes from './routes/agent.js';
 import budgetRoutes from './routes/budgets.js';
 import quoteRoutes from './routes/quotes.js';
 import transactionRoutes from './routes/transactions.js';
+import paymentRoutes from './routes/payments.js';
+import vendorRoutes from './vendor.routes.js';
+import purchaseRoutes from './purchase.routes.js';
 
 const app = express();
 
 // ── Global middleware ────────────────────────────────────────────────────────
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin:
+    config.CORS_ORIGINS.length > 0
+      ? config.CORS_ORIGINS
+      : config.NODE_ENV === 'development'
+        ? true
+        : false,
+}));
 app.use(morgan(config.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '1mb' }));
 
@@ -25,7 +35,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/agent', agentRoutes);
 app.use('/api/budgets', budgetRoutes);
 app.use('/api/quotes', quoteRoutes);
+app.use('/api/vendors', vendorRoutes);
+app.use('/api/purchases', purchaseRoutes);
 app.use('/api/transactions', transactionRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
@@ -39,7 +52,6 @@ app.use(errorHandler);
 connectDB().then(() => {
   app.listen(config.PORT, () => {
     console.log(`Scoutyon Backend running on http://localhost:${config.PORT}`);
-    console.log(`Simulate payments: ${config.SIMULATE_PAYMENTS}`);
-    console.log(`NEAR network: ${config.NEAR_NETWORK}`);
+    console.log(`Live payments enabled: ${config.PAYMENTS_LIVE_ENABLED && !config.SIMULATE_PAYMENTS}`);
   });
 });

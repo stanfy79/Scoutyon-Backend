@@ -1,6 +1,14 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export type TxStatus = 'simulated' | 'pending' | 'confirmed' | 'failed';
+export type TxStatus =
+  | 'simulated'
+  | 'pending'
+  | 'confirmed'
+  | 'failed'
+  | 'source_confirmed'
+  | 'processing'
+  | 'refunded'
+  | 'incomplete_deposit';
 
 export interface ITransaction extends Document {
   quoteId: mongoose.Types.ObjectId;
@@ -12,6 +20,9 @@ export interface ITransaction extends Document {
   txHash?: string;
   status: TxStatus;
   simulated: boolean;
+  simulation: boolean;
+  paymentAttemptId?: mongoose.Types.ObjectId;
+  amountAtomic?: string;
   metadata: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
@@ -32,6 +43,9 @@ const transactionSchema = new Schema<ITransaction>(
       default: 'simulated',
     },
     simulated: { type: Boolean, default: true },
+    simulation: { type: Boolean, default: true },
+    paymentAttemptId: { type: Schema.Types.ObjectId, ref: 'PaymentAttempt', index: true },
+    amountAtomic: { type: String, match: /^\d+$/ },
     metadata: { type: Schema.Types.Mixed, default: {} },
   },
   { timestamps: true },

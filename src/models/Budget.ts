@@ -5,6 +5,7 @@ export interface IBudget extends Document {
   label: string;
   totalLimit: number;
   spent: number;
+  reserved: number;
   currency: string;
   active: boolean;
   approvedRecipients: string[];
@@ -18,6 +19,7 @@ const budgetSchema = new Schema<IBudget>(
     label: { type: String, required: true, trim: true },
     totalLimit: { type: Number, required: true, min: 0 },
     spent: { type: Number, default: 0, min: 0 },
+    reserved: { type: Number, default: 0, min: 0 },
     currency: { type: String, default: 'USD', uppercase: true },
     active: { type: Boolean, default: true },
     approvedRecipients: [{ type: String, trim: true }],
