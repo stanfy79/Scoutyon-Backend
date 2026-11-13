@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { Session } from '../models/Session.js';
 import { runAgent } from '../agent/runner.js';
@@ -70,7 +70,6 @@ router.post('/chat', async (req, res, next) => {
       sessionId: session._id.toString(),
       userId: req.userId!,
       budgetId,
-      history: [],
       res,
     });
 

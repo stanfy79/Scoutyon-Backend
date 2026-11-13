@@ -28,9 +28,15 @@ router.post('/sync', async (req, res, next) => {
       return;
     }
 
+    const rawIdToken =
+      req.headers['privy-id-token'] ||
+      req.headers['x-privy-id-token'] ||
+      req.body?.idToken;
+    const idToken = typeof rawIdToken === 'string' && rawIdToken.trim() ? rawIdToken.trim() : undefined;
+
     const claims = await verifyAccessToken(accessToken);
 
-    const privyUser = await getPrivyUserById(claims.userId);
+    const privyUser = await getPrivyUserById(claims.userId, idToken);
     if (claims.userId !== privyUser.id) {
       res.status(401).json({ error: 'Privy user profile does not match the access token' });
       return;

@@ -56,11 +56,22 @@ export async function verifyAccessToken(token: string): Promise<VerifiedClaims> 
 
 /**
  * Retrieves the authoritative Privy user profile by a verified access-token user ID.
+ * Optionally attempts lookup by identity token first if provided, then queries the Privy REST API via _get(userId).
  */
-export async function getPrivyUserById(userId: string) {
+export async function getPrivyUserById(userId: string, idToken?: string) {
   const client = getPrivyClient();
   try {
-    const user = await client.users().get(userId);
+    if (idToken) {
+      try {
+        const userFromToken = await client.users().get({ id_token: idToken });
+        if (userFromToken && userFromToken.id === userId) {
+          return userFromToken;
+        }
+      } catch {
+        // Fall back to REST API user lookup
+      }
+    }
+    const user = await client.users()._get(userId);
     return user;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to retrieve Privy user';
