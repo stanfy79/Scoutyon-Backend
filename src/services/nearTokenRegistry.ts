@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { getSupportedTokens, type NearIntentToken } from './nearIntents.js';
+import { getSupportedTokens, NearIntentsError, type NearIntentToken } from './nearIntents.js';
 
 let catalogue: { expiresAt: number; tokens: NearIntentToken[] } | null = null;
 const approvedEvmChainIds: Record<string, number> = {
@@ -14,12 +14,33 @@ export async function getTokenCatalogue(): Promise<NearIntentToken[]> {
 }
 
 async function refreshTokenCatalogue(): Promise<NearIntentToken[]> {
-  const tokens = await getSupportedTokens();
-  catalogue = {
-    tokens,
-    expiresAt: Date.now() + config.PAYMENT_TOKEN_CACHE_TTL_SECONDS * 1000,
-  };
-  return tokens;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const tokens = await getSupportedTokens();
+      catalogue = {
+        tokens,
+        expiresAt: Date.now() + config.PAYMENT_TOKEN_CACHE_TTL_SECONDS * 1000,
+      };
+      return tokens;
+    } catch (error) {
+      const retryable = error instanceof NearIntentsError &&
+        ['NEAR_INTENTS_NETWORK_ERROR', 'NEAR_INTENTS_TIMEOUT', 'NEAR_INTENTS_PROVIDER_ERROR', 'NEAR_INTENTS_RATE_LIMITED'].includes(error.code);
+      if (attempt === 0 && retryable) {
+        const delay = error.retryAfterMs ?? 300;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      if (catalogue && retryable) {
+        console.warn('[NEAR Intents] using the last successful token catalogue after refresh failed', {
+          ageMs: Date.now() - (catalogue.expiresAt - config.PAYMENT_TOKEN_CACHE_TTL_SECONDS * 1000),
+          errorCode: error.code,
+        });
+        return catalogue.tokens;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Unable to refresh the NEAR Intents token catalogue');
 }
 
 export async function getTokenByAssetId(assetId: string): Promise<NearIntentToken> {

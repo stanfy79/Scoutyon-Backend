@@ -2,6 +2,15 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export type WalletProvisioningStatus = 'pending' | 'completed' | 'failed';
 export type AccountStatus = 'active' | 'suspended';
+export type PaymentSignerAuthorizationStatus = 'not_authorized' | 'authorized';
+
+export interface IPaymentSignerAuthorization {
+  status: PaymentSignerAuthorizationStatus;
+  walletId: string | null;
+  signerId: string | null;
+  policyId: string | null;
+  verifiedAt: Date | null;
+}
 
 export interface IUser extends Document {
   // Privy identity
@@ -14,6 +23,7 @@ export interface IUser extends Document {
   walletAddress: string | null;
   walletChainType: string | null;
   walletProvisioningStatus: WalletProvisioningStatus;
+  paymentSignerAuthorization: IPaymentSignerAuthorization;
 
   // Status & Timestamps
   accountStatus: AccountStatus;
@@ -39,6 +49,13 @@ const userSchema = new Schema<IUser>(
       type: String,
       enum: ['pending', 'completed', 'failed'],
       default: 'pending',
+    },
+    paymentSignerAuthorization: {
+      status: { type: String, enum: ['not_authorized', 'authorized'], default: 'not_authorized' },
+      walletId: { type: String, default: null },
+      signerId: { type: String, default: null },
+      policyId: { type: String, default: null },
+      verifiedAt: { type: Date, default: null },
     },
 
     accountStatus: {

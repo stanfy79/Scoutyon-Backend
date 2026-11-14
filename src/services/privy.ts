@@ -33,6 +33,15 @@ export interface VerifiedClaims {
   userId: string;
 }
 
+export function assertPrivyAppIdMatches(tokenAppId: string, configuredAppId: string): void {
+  if (!tokenAppId || tokenAppId !== configuredAppId) {
+    throw Object.assign(new Error('The Privy access token belongs to a different application'), {
+      code: 'PRIVY_APP_ID_MISMATCH',
+      statusCode: 401,
+    });
+  }
+}
+
 /**
  * Verifies an access token via Privy SDK.
  */
@@ -40,6 +49,7 @@ export async function verifyAccessToken(token: string): Promise<VerifiedClaims> 
   const client = getPrivyClient();
   try {
     const claims = await client.utils().auth().verifyAccessToken(token);
+    assertPrivyAppIdMatches(claims.app_id, config.PRIVY_APP_ID);
     return {
       appId: claims.app_id,
       issuer: claims.issuer,

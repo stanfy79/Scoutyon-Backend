@@ -23,6 +23,26 @@ import { inspectMerchantPaymentProfile, normalizeProviderId } from '../services/
 import type { IPaymentAttempt } from '../models/PaymentAttempt.js';
 
 const router = Router();
+
+async function persistSignerCheck(
+  userId: string,
+  values: {
+    status: 'not_authorized' | 'authorized';
+    walletId: string | null;
+    signerId: string | null;
+    policyId: string | null;
+    verifiedAt: Date | null;
+  },
+): Promise<void> {
+  await User.updateOne(
+    { _id: userId },
+    {
+      $set: {
+        paymentSignerAuthorization: values,
+      },
+    },
+  );
+}
 router.use(rateLimit({
   windowMs: 60_000,
   limit: 30,
@@ -168,12 +188,26 @@ router.get('/readiness', async (req, res, next) => {
     let signerErrorMessage: string | null = null;
     if (user.walletId && user.walletAddress && user.privyUserId) {
       try {
-        await assertServerSignerConfigured(user.walletId, user.walletAddress, user.privyUserId);
+        const verification = await assertServerSignerConfigured(user.walletId, user.walletAddress, user.privyUserId);
+        await persistSignerCheck(user._id.toString(), {
+          status: 'authorized',
+          walletId: verification.walletId,
+          signerId: verification.signerId,
+          policyId: verification.policyId,
+          verifiedAt: verification.verifiedAt,
+        });
         signerDelegated = true;
       } catch (error) {
         signerDelegated = false;
         signerError = (error as { code?: string }).code ?? 'WALLET_NOT_DELEGATED';
         signerErrorMessage = error instanceof Error ? error.message : 'Unable to verify the Privy payment signer';
+        await persistSignerCheck(user._id.toString(), {
+          status: 'not_authorized',
+          walletId: user.walletId,
+          signerId: config.PRIVY_KEY_QUORUM_ID ?? null,
+          policyId: config.PRIVY_TRANSFER_POLICY_ID ?? null,
+          verifiedAt: null,
+        });
       }
     } else {
       signerError = 'WALLET_NOT_CONFIGURED';
@@ -223,11 +257,15 @@ router.get('/readiness', async (req, res, next) => {
         signerError,
         signerErrorMessage,
         signerSetupInstructions:
-          signerError === 'WALLET_NOT_DELEGATED'
-            ? 'The wallet owner must explicitly authorize the configured Privy key quorum and transfer policy for this wallet through an owner-authorized Privy flow. This readiness check does not attach signers or change wallet ownership.'
+          signerError === 'WALLET_NOT_DELEGATED' || signerError === 'SIGNER_NOT_REGISTERED'
+            ? 'Use the wallet interface action “Enable Scoutyon Payment Authorization” to add the configured key quorum with its restrictive policy after explicit consent.'
             : signerError === 'WALLET_OWNER_MISMATCH'
               ? 'Authenticate with the Privy identity that owns this wallet or reconcile the stored user-to-wallet association after owner verification. Do not reassign wallet ownership.'
-              : null,
+              : signerError === 'SIGNER_POLICY_REJECTED'
+                ? 'Create or attach the configured restrictive Base ERC-20 transfer policy in the Privy Dashboard and reauthorize the signer.'
+                : signerError === 'SIGNER_CONFIGURATION_MISSING'
+                  ? 'Register the P-256 public authorization key as a 1-of-1 Privy key quorum and configure PRIVY_KEY_QUORUM_ID, PRIVY_TRANSFER_POLICY_ID, PRIVY_AUTHORIZATION_PRIVATE_KEY, and PRIVY_BASE_TOKEN_LIMITS on the backend.'
+                  : null,
         sourceAsset,
         sourceAssetError,
         sourceAssetErrorMessage,
@@ -408,7 +446,14 @@ router.post('/:paymentId/confirm', async (req, res, next) => {
         statusCode: 409,
       });
     }
-    await assertServerSignerConfigured(attempt.privyWalletId, user.walletAddress, user.privyUserId);
+    const signerVerification = await assertServerSignerConfigured(attempt.privyWalletId, user.walletAddress, user.privyUserId);
+    await persistSignerCheck(user._id.toString(), {
+      status: 'authorized',
+      walletId: signerVerification.walletId,
+      signerId: signerVerification.signerId,
+      policyId: signerVerification.policyId,
+      verifiedAt: signerVerification.verifiedAt,
+    });
     const maximumPolicy = await checkPaymentPolicy({
       userId: req.userId!,
       budgetId: attempt.budgetId.toString(),
@@ -629,7 +674,14 @@ export async function prepareQuotePayment(req: Request, res: Response, next: Nex
         statusCode: 409,
       });
     }
-    await assertServerSignerConfigured(user.walletId, user.walletAddress, user.privyUserId);
+    const signerVerification = await assertServerSignerConfigured(user.walletId, user.walletAddress, user.privyUserId);
+    await persistSignerCheck(user._id.toString(), {
+      status: 'authorized',
+      walletId: signerVerification.walletId,
+      signerId: signerVerification.signerId,
+      policyId: signerVerification.policyId,
+      verifiedAt: signerVerification.verifiedAt,
+    });
     const sourceToken = await getConfiguredSourceToken();
     const executableQuote = await createExecutableQuote({
       originAsset: sourceToken.assetId,

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classifyChatIntent } from '../src/agent/intents.js';
 import { buildGeminiContextPrompt, buildSessionSummaryFromMessages } from '../src/services/sessionMemory.js';
+import { NearIntentsError, previewQuote } from '../src/services/nearIntents.js';
 import {
   parseHumanAmountToAtomic,
   requestLiveSwapQuote,
@@ -46,6 +47,8 @@ test('classifies complete swap requests without requiring a redundant recipient 
 
 test('classifies prepare and confirmation follow-ups', () => {
   assert.equal(classifyChatIntent('Prepare that swap.').intent, 'transfer_prepare_request');
+  assert.equal(classifyChatIntent('Proceed.').intent, 'transfer_prepare_request');
+  assert.equal(classifyChatIntent('Confirm.').intent, 'transfer_confirm_request');
   assert.equal(classifyChatIntent('Confirm this transaction.').intent, 'transfer_confirm_request');
   assert.equal(classifyChatIntent('Check my last transfer.').intent, 'transfer_status_request');
 });
@@ -122,7 +125,7 @@ test('requests and returns a real EXACT_INPUT NEAR Intents quote preview', async
         amountOut: '9876543210000000000000000',
         amountOutFormatted: '9.87654321',
         minAmountOut: '9500000000000000000000000',
-        deadline: '2026-11-10T21:00:00.000Z',
+        deadline: new Date(Date.now() + 60_000).toISOString(),
         timeEstimate: 45,
       },
     }), { status: 200 });
@@ -145,11 +148,76 @@ test('requests and returns a real EXACT_INPUT NEAR Intents quote preview', async
     assert.equal(requestBody?.dry, true);
     assert.equal(requestBody?.swapType, 'EXACT_INPUT');
     assert.equal(requestBody?.originAsset, swapTokens[0]?.assetId);
+    assert.equal(requestBody?.depositType, 'ORIGIN_CHAIN');
+    assert.equal(requestBody?.recipientType, 'DESTINATION_CHAIN');
+    assert.equal(requestBody?.refundType, 'ORIGIN_CHAIN');
     assert.equal(requestBody?.destinationAsset, swapTokens[2]?.assetId);
     assert.equal(requestBody?.amount, '12340000');
+    assert.equal(requestBody?.slippageTolerance, 100);
+    assert.equal(typeof requestBody?.deadline, 'string');
+    assert.ok(Date.parse(String(requestBody?.deadline)) > Date.now());
     assert.equal(result.quote.correlationId, 'near-correlation-1');
     assert.equal(result.quote.amountOutFormatted, '9.87654321');
     assert.equal(result.recipient, 'alice.near');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('preserves NEAR Intents validation details instead of reporting provider downtime', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    statusCode: 400,
+    message: 'slippageTolerance should not be empty',
+  }), { status: 400 });
+
+  try {
+    await assert.rejects(
+      previewQuote({ amount: '1' }),
+      (error: unknown) =>
+        error instanceof NearIntentsError &&
+        error.code === 'NEAR_INTENTS_REQUEST_REJECTED' &&
+        error.statusCode === 400 &&
+        error.message.includes('slippageTolerance'),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('classifies invalid partner authentication distinctly', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 });
+
+  try {
+    await assert.rejects(
+      previewQuote({ amount: '1' }),
+      (error: unknown) =>
+        error instanceof NearIntentsError &&
+        error.code === 'NEAR_INTENTS_AUTH_FAILED' &&
+        error.statusCode === 503,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('classifies rate limits and retains bounded Retry-After timing', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ message: 'Slow down' }), {
+    status: 429,
+    headers: { 'retry-after': '2' },
+  });
+
+  try {
+    await assert.rejects(
+      previewQuote({ amount: '1' }),
+      (error: unknown) =>
+        error instanceof NearIntentsError &&
+        error.code === 'NEAR_INTENTS_RATE_LIMITED' &&
+        error.statusCode === 429 &&
+        error.retryAfterMs === 2_000,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

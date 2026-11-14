@@ -2,22 +2,24 @@ import type { AuthorizationContext } from '@privy-io/node';
 import { encodeFunctionData, isAddress, isHash, parseAbi } from 'viem';
 import { config } from '../config.js';
 import { getPrivyClient } from './privy.js';
+import { assertWalletBelongsToUser, type PrivyWalletRecord } from './privyWalletOwnership.js';
+import {
+  assertAllowedBasePaymentTransaction,
+  assertSignerInfrastructure,
+  defaultPrivySignerDependencies,
+  inspectWalletSigner,
+  signerVerification,
+  throwSignerStatus,
+  type PrivySignerDependencies,
+  type SignerVerification,
+} from './privyPaymentSigner.js';
 import type { IPaymentAttempt } from '../models/PaymentAttempt.js';
 
 const transferAbi = parseAbi(['function transfer(address to, uint256 value) returns (bool)']);
-
-interface PrivyWalletSnapshot {
-  id: string;
-  owner_id: string | null;
-  address: string;
-  chain_type: string;
-  additional_signers?: Array<{
-    signer_id: string;
-    override_policy_ids?: string[];
-  }>;
-}
-
-type WalletLookup = (walletId: string) => Promise<PrivyWalletSnapshot>;
+type PrivyWalletSnapshot = PrivyWalletRecord & {
+  additional_signers?: Array<{ signer_id: string; override_policy_ids?: string[] }>;
+};
+type WalletLookup = PrivySignerDependencies['walletLookup'];
 
 function getErrorStatus(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null) return undefined;
@@ -29,22 +31,19 @@ export async function assertServerSignerConfigured(
   walletId: string,
   expectedAddress: string,
   privyUserId: string,
-  walletLookup: WalletLookup = async (id) => await getPrivyClient().wallets().get(id),
-): Promise<void> {
-  if (
-    !config.PRIVY_KEY_QUORUM_ID ||
-    !config.PRIVY_TRANSFER_POLICY_ID ||
-    !config.PRIVY_AUTHORIZATION_PRIVATE_KEY
-  ) {
-    throw Object.assign(new Error('The server signer is not configured'), {
-      code: 'SERVER_SIGNER_NOT_CONFIGURED',
-      statusCode: 503,
-    });
-  }
-
+  walletLookup?: WalletLookup,
+  signerDependencies?: Partial<PrivySignerDependencies>,
+): Promise<SignerVerification> {
+  const defaults = defaultPrivySignerDependencies();
+  const dependencies: PrivySignerDependencies = {
+    walletLookup: walletLookup ?? signerDependencies?.walletLookup ?? defaults.walletLookup,
+    keyQuorumLookup: signerDependencies?.keyQuorumLookup ?? defaults.keyQuorumLookup,
+    policyLookup: signerDependencies?.policyLookup ?? defaults.policyLookup,
+  };
+  const settings = await assertSignerInfrastructure(dependencies);
   let wallet: PrivyWalletSnapshot;
   try {
-    wallet = await walletLookup(walletId);
+    wallet = await dependencies.walletLookup(walletId);
   } catch (error) {
     const status = getErrorStatus(error);
     if (status === 404 || (error instanceof Error && error.name === 'NotFoundError')) {
@@ -72,41 +71,10 @@ export async function assertServerSignerConfigured(
     });
   }
 
-  const authorized = (wallet.additional_signers ?? []).some(
-    (signer) =>
-      signer.signer_id === config.PRIVY_KEY_QUORUM_ID &&
-      signer.override_policy_ids?.includes(config.PRIVY_TRANSFER_POLICY_ID!),
-  );
-  if (wallet.id !== walletId) {
-    throw Object.assign(new Error('Privy returned a different wallet ID than the stored wallet ID'), {
-      code: 'WALLET_ID_MISMATCH',
-      statusCode: 403,
-    });
-  }
-  if (wallet.owner_id !== privyUserId) {
-    throw Object.assign(new Error('The stored Privy user does not own the configured payment wallet'), {
-      code: 'WALLET_OWNER_MISMATCH',
-      statusCode: 403,
-    });
-  }
-  if (wallet.address.toLowerCase() !== expectedAddress.toLowerCase()) {
-    throw Object.assign(new Error('The Privy wallet address does not match the stored wallet address'), {
-      code: 'WALLET_ADDRESS_MISMATCH',
-      statusCode: 403,
-    });
-  }
-  if (wallet.chain_type !== 'ethereum') {
-    throw Object.assign(new Error('The configured Privy wallet is not an Ethereum wallet'), {
-      code: 'WALLET_CHAIN_MISMATCH',
-      statusCode: 403,
-    });
-  }
-  if (!authorized) {
-    throw Object.assign(new Error('The user has not authorized the Scoutyon payment signer'), {
-      code: 'WALLET_NOT_DELEGATED',
-      statusCode: 403,
-    });
-  }
+  assertWalletBelongsToUser(wallet, walletId, privyUserId, expectedAddress);
+  const signerStatus = inspectWalletSigner(wallet, settings);
+  if (!signerStatus.authorized) throwSignerStatus(signerStatus);
+  return signerVerification(wallet, settings);
 }
 
 export async function sendErc20Deposit(input: {
@@ -129,6 +97,11 @@ export async function sendErc20Deposit(input: {
       statusCode: 400,
     });
   }
+  assertAllowedBasePaymentTransaction(
+    Number(input.attempt.originCaip2.split(':')[1]),
+    input.attempt.originTokenAddress,
+    input.attempt.amountIn,
+  );
   await assertServerSignerConfigured(input.attempt.privyWalletId, input.walletAddress, input.privyUserId);
   const authorizationContext: AuthorizationContext = {
     authorization_private_keys: [config.PRIVY_AUTHORIZATION_PRIVATE_KEY!],
@@ -169,6 +142,18 @@ export async function sendErc20Deposit(input: {
   } catch (error) {
     const responseStatus = (error as { status?: number; statusCode?: number }).status ??
       (error as { statusCode?: number }).statusCode;
+    if (responseStatus === 403 && /policy/i.test(error instanceof Error ? error.message : '')) {
+      throw Object.assign(new Error('Privy rejected the transaction under the configured payment policy.'), {
+        code: 'SIGNER_POLICY_REJECTED',
+        statusCode: 403,
+      });
+    }
+    if (responseStatus === 401 || responseStatus === 403) {
+      throw Object.assign(new Error('Privy could not authorize this request with the configured P-256 key quorum.'), {
+        code: 'PRIVY_AUTHORIZATION_FAILED',
+        statusCode: 403,
+      });
+    }
     if (
       error instanceof Error &&
       (error.name === 'AbortError' || error.name === 'TimeoutError' || /timeout|timed out/i.test(error.message))

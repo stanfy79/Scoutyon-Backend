@@ -1,6 +1,7 @@
 import {
   createPublicClient,
   decodeEventLog,
+  decodeFunctionData,
   http,
   isAddress,
   parseAbi,
@@ -16,14 +17,25 @@ const erc20Abi = parseAbi([
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 ]);
 
-function getClient() {
-  if (!config.PAYMENT_SOURCE_RPC_URL || !config.PAYMENT_SOURCE_CHAIN_ID) {
+export function hasEvmChainRpc(chainId: number): boolean {
+  return chainId === config.PAYMENT_SOURCE_CHAIN_ID
+    ? Boolean(config.PAYMENT_SOURCE_RPC_URL)
+    : Boolean(config.SWAP_EVM_RPC_URLS[String(chainId)]);
+}
+
+function getClient(chainId = config.PAYMENT_SOURCE_CHAIN_ID) {
+  const rpcUrl = chainId === config.PAYMENT_SOURCE_CHAIN_ID
+    ? config.PAYMENT_SOURCE_RPC_URL
+    : chainId === undefined
+      ? undefined
+      : config.SWAP_EVM_RPC_URLS[String(chainId)];
+  if (!rpcUrl || !chainId) {
     throw Object.assign(new Error('Payment network is not configured'), {
       code: 'PAYMENTS_DISABLED',
       statusCode: 503,
     });
   }
-  return createPublicClient({ transport: http(config.PAYMENT_SOURCE_RPC_URL) });
+  return createPublicClient({ transport: http(rpcUrl) });
 }
 
 export async function assertConfiguredChain(): Promise<void> {
@@ -146,7 +158,7 @@ export async function assertSufficientBalance(
     });
   }
 
-  const client = getClient();
+  const client = getClient(attempt.originChainId);
   const wallet = walletAddress as Address;
   const tokenAddress = attempt.originTokenAddress as Address;
   let chainId: number;
@@ -223,7 +235,7 @@ export async function verifyTransferReceipt(input: {
   amount: string;
   chainId: number;
 }): Promise<void> {
-  const client = getClient();
+  const client = getClient(input.chainId);
   if ((await client.getChainId()) !== input.chainId) {
     throw Object.assign(new Error('Payment RPC chain ID does not match the submitted transaction'), {
       code: 'PAYMENT_CHAIN_MISMATCH',
@@ -272,6 +284,70 @@ export async function verifyTransferReceipt(input: {
       statusCode: 502,
     });
   }
+}
+
+export async function verifyConfiguredErc20Transfer(input: {
+  transactionHash: `0x${string}`;
+  walletAddress: string;
+  tokenAddress: string;
+  depositAddress: string;
+  amount: string;
+  chainId: number;
+}): Promise<void> {
+  if (
+    !isAddress(input.walletAddress) ||
+    !isAddress(input.tokenAddress) ||
+    !isAddress(input.depositAddress) ||
+    !/^\d+$/.test(input.amount)
+  ) {
+    throw Object.assign(new Error('The prepared ERC-20 transfer details are invalid'), {
+      code: 'SOURCE_TRANSACTION_INVALID',
+      statusCode: 400,
+    });
+  }
+  const client = getClient(input.chainId);
+  let transaction;
+  try {
+    transaction = await client.getTransaction({ hash: input.transactionHash });
+  } catch {
+    throw Object.assign(new Error('Source transaction is not available on the configured network yet'), {
+      code: 'SOURCE_TX_PENDING',
+      statusCode: 202,
+    });
+  }
+  if (
+    transaction.from.toLowerCase() !== input.walletAddress.toLowerCase() ||
+    transaction.to?.toLowerCase() !== input.tokenAddress.toLowerCase() ||
+    transaction.value !== 0n
+  ) {
+    throw Object.assign(new Error('Submitted transaction does not match the authorized wallet and token contract'), {
+      code: 'SOURCE_TRANSACTION_INVALID',
+      statusCode: 400,
+    });
+  }
+  let decoded;
+  try {
+    decoded = decodeFunctionData({
+      abi: erc20Abi,
+      data: transaction.input,
+    });
+  } catch {
+    throw Object.assign(new Error('Submitted transaction is not a valid ERC-20 transfer call'), {
+      code: 'SOURCE_TRANSACTION_INVALID',
+      statusCode: 400,
+    });
+  }
+  if (
+    decoded.functionName !== 'transfer' ||
+    decoded.args[0].toLowerCase() !== input.depositAddress.toLowerCase() ||
+    decoded.args[1] !== BigInt(input.amount)
+  ) {
+    throw Object.assign(new Error('Submitted transaction recipient or amount does not match the prepared NEAR Intents quote'), {
+      code: 'SOURCE_TRANSACTION_INVALID',
+      statusCode: 400,
+    });
+  }
+  await verifyTransferReceipt(input);
 }
 
 function decodeTransferLog(log: {

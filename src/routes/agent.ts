@@ -13,7 +13,7 @@ router.use(authMiddleware);
  *
  * Body: { goal: string, budgetId?: string, sessionId?: string }
  *
- * SSE event types: session | text | tool_call | tool_result | quote | error | done
+ * SSE event types: session | text | tool_call | tool_result | quote | wallet_action | error | done
  */
 router.post('/chat', async (req, res, next) => {
   try {

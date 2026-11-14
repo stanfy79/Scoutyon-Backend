@@ -65,7 +65,8 @@ export function classifyChatIntent(message: string): ChatIntentClassification {
   const transferQuoteIndicators = /(how much|estimate|quote|rate|fees?|cost.*(near|eth|usdc)|what.*(rate|fee)|can i get.*for|what.*(quote|fees?))/i;
   const transferExecuteIndicators = /(swap|transfer|send|exchange|move).*(usdc|near|eth|token|asset|crypto)|\b(send|transfer|swap)\s+\d+\b|\b(make it|use base|use near|make that)\b/i;
   const transferPrepareIndicators = /(prepare|proceed|continue|let's proceed|go ahead|continue with the quote|prepare that|prepare the transaction|do the swap|continue this)/i;
-  const transferConfirmIndicators = /(confirm|i confirm|yes,? execute|proceed with the transfer|approve|authorize)/i;
+  const transferConfirmIndicators =
+    /^(?:confirm|i confirm|approve|authorize|yes(?:,?\s+i)?\s+(?:confirm|approve|authorize)|confirm (?:(?:the|this) )?(?:transfer|swap|transaction)|approve (?:(?:the|this) )?(?:transfer|swap|transaction)|authorize (?:(?:the|this) )?(?:transfer|swap|transaction)|send it)[.! ]*$/i;
   const transferStatusIndicators = /(check|status|last transfer|last swap|has it arrived|where is my transfer|transaction status|what about the fees\?|how much did it cost)/i;
 
   if (transferConfirmIndicators.test(lower)) {

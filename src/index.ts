@@ -12,6 +12,8 @@ import budgetRoutes from './routes/budgets.js';
 import quoteRoutes from './routes/quotes.js';
 import transactionRoutes from './routes/transactions.js';
 import paymentRoutes from './routes/payments.js';
+import transferRoutes from './routes/transfers.js';
+import { assertSignerInfrastructure } from './services/privyPaymentSigner.js';
 import vendorRoutes from './vendor.routes.js';
 import purchaseRoutes from './purchase.routes.js';
 
@@ -39,6 +41,7 @@ app.use('/api/vendors', vendorRoutes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/transfers', transferRoutes);
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
@@ -49,9 +52,21 @@ app.get('/health', (_req, res) => {
 app.use(errorHandler);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
-connectDB().then(() => {
+async function start(): Promise<void> {
+  await connectDB();
+  if (config.PAYMENTS_LIVE_ENABLED) {
+    await assertSignerInfrastructure();
+  }
   app.listen(config.PORT, () => {
     console.log(`Scoutyon Backend running on http://localhost:${config.PORT}`);
     console.log(`Live payments enabled: ${config.PAYMENTS_LIVE_ENABLED && !config.SIMULATE_PAYMENTS}`);
   });
+}
+
+start().catch((error: unknown) => {
+  const failure = error as { code?: string; message?: string };
+  console.error(
+    `Scoutyon Backend startup failed${failure.code ? ` (${failure.code})` : ''}: ${failure.message ?? 'Unknown error'}`,
+  );
+  process.exitCode = 1;
 });

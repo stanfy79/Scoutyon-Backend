@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { afterEach, test } from 'node:test';
+import { afterEach, beforeEach, test } from 'node:test';
 import {
   createExecutableQuote,
   getSupportedTokens,
@@ -10,6 +10,7 @@ import { config } from '../src/config.js';
 import { getConfiguredSourceToken } from '../src/services/nearTokenRegistry.js';
 import { assertServerSignerConfigured, sendErc20Deposit } from '../src/services/privyWalletSender.js';
 import { assertSufficientBalance, getWalletBalances } from '../src/services/walletBalance.js';
+import { configureTestSigner } from './helpers/privySigner.js';
 
 const originalFetch = globalThis.fetch;
 const originalPaymentConfig = {
@@ -19,6 +20,11 @@ const originalPaymentConfig = {
   PAYMENT_SOURCE_TOKEN_ADDRESS: config.PAYMENT_SOURCE_TOKEN_ADDRESS,
   PAYMENTS_LIVE_ENABLED: config.PAYMENTS_LIVE_ENABLED,
   SIMULATE_PAYMENTS: config.SIMULATE_PAYMENTS,
+  PRIVY_APP_ID: config.PRIVY_APP_ID,
+  PRIVY_KEY_QUORUM_ID: config.PRIVY_KEY_QUORUM_ID,
+  PRIVY_TRANSFER_POLICY_ID: config.PRIVY_TRANSFER_POLICY_ID,
+  PRIVY_AUTHORIZATION_PRIVATE_KEY: config.PRIVY_AUTHORIZATION_PRIVATE_KEY,
+  PRIVY_BASE_TOKEN_LIMITS: config.PRIVY_BASE_TOKEN_LIMITS,
 };
 
 const walletAddress = '0xa3eBeE5ef77258FB070716cB668f22f43A123F36';
@@ -29,7 +35,11 @@ const baseUsdc = {
   symbol: 'USDC',
   contractAddress: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
 };
+let signerDependencies: Awaited<ReturnType<typeof configureTestSigner>>['dependencies'];
 
+beforeEach(async () => {
+  ({ dependencies: signerDependencies } = await configureTestSigner());
+});
 afterEach(() => {
   globalThis.fetch = originalFetch;
   Object.assign(config, originalPaymentConfig);
@@ -39,7 +49,7 @@ test('rejects a Privy wallet ID that does not exist in the configured app', asyn
   await assert.rejects(
     assertServerSignerConfigured('missing-wallet', walletAddress, 'user-1', async () => {
       throw Object.assign(new Error('not found'), { status: 404 });
-    }),
+    }, signerDependencies),
     { code: 'PRIVY_WALLET_NOT_FOUND' },
   );
 });
@@ -48,7 +58,7 @@ test('distinguishes rejected Privy application credentials from a missing wallet
   await assert.rejects(
     assertServerSignerConfigured('wallet-1', walletAddress, 'user-1', async () => {
       throw Object.assign(new Error('unauthorized'), { status: 401 });
-    }),
+    }, signerDependencies),
     { code: 'PRIVY_APP_CREDENTIALS_INVALID' },
   );
 });
@@ -61,7 +71,7 @@ test('rejects an existing wallet that has no delegated payment signer', async ()
       address: walletAddress,
       chain_type: 'ethereum',
       additional_signers: [],
-    })),
+    }), signerDependencies),
     { code: 'WALLET_NOT_DELEGATED' },
   );
 });
@@ -78,7 +88,7 @@ test('accepts a wallet delegated to the configured key quorum and transfer polic
         override_policy_ids: [config.PRIVY_TRANSFER_POLICY_ID!],
       },
     ],
-  }));
+  }), signerDependencies);
 });
 
 test('rejects a wallet owned by a different Privy user', async () => {
@@ -89,7 +99,7 @@ test('rejects a wallet owned by a different Privy user', async () => {
       address: walletAddress,
       chain_type: 'ethereum',
       additional_signers: [],
-    })),
+    }), signerDependencies),
     { code: 'WALLET_OWNER_MISMATCH' },
   );
 });

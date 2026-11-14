@@ -13,6 +13,7 @@ export interface ISwapQuote extends Document {
   destinationBlockchain: string;
   destinationDecimals: number;
   amountIn: string;
+  requestedAmount: string;
   amountInFormatted: string | null;
   amountOut: string;
   amountOutFormatted: string | null;
@@ -21,7 +22,9 @@ export interface ISwapQuote extends Document {
   refundTo: string;
   expiresAt: Date | null;
   timeEstimateSeconds: number | null;
-  status: 'preview' | 'expired';
+  slippageTolerance: number;
+  providerResponse: Record<string, unknown> | null;
+  status: 'preview' | 'prepared' | 'expired';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,6 +43,7 @@ const swapQuoteSchema = new Schema<ISwapQuote>(
     destinationBlockchain: { type: String, required: true },
     destinationDecimals: { type: Number, required: true },
     amountIn: { type: String, required: true, match: /^\d+$/ },
+    requestedAmount: { type: String, required: true },
     amountInFormatted: { type: String, default: null },
     amountOut: { type: String, required: true, match: /^\d+$/ },
     amountOutFormatted: { type: String, default: null },
@@ -48,7 +52,9 @@ const swapQuoteSchema = new Schema<ISwapQuote>(
     refundTo: { type: String, required: true },
     expiresAt: { type: Date, default: null },
     timeEstimateSeconds: { type: Number, default: null },
-    status: { type: String, enum: ['preview', 'expired'], default: 'preview', index: true },
+    slippageTolerance: { type: Number, required: true },
+    providerResponse: { type: Schema.Types.Mixed, default: null },
+    status: { type: String, enum: ['preview', 'prepared', 'expired'], default: 'preview', index: true },
   },
   { timestamps: true },
 );

@@ -114,7 +114,7 @@ export const agentTools: Tool[] = [
       },
       {
         name: 'get_transfer_quote',
-        description: 'Get a real live swap quote from the NEAR Intents 1Click API. Provide token symbols (not guessed asset IDs), human-readable input amount, and networks when needed. Use session context to fill omitted prior details; if required information is still missing or ambiguous, return a clarification instead of guessing.',
+        description: 'Get a real live swap quote preview from NEAR Intents. Use only for a new or changed transfer request. If the user says proceed with the current preview, call prepare_transfer instead; never create another preview for that follow-up.',
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -130,7 +130,7 @@ export const agentTools: Tool[] = [
       },
       {
         name: 'prepare_transfer',
-        description: 'Prepare a persisted transfer workflow from an executable quote after review.',
+        description: 'MANDATORY when the user says proceed after reviewing the current transfer preview. Pass its saved quoteId or omit it to use the exact pending preview in session memory. This requests and persists a fresh dry:false executable NEAR Intents quote; it does not move funds. If it returns updated terms due to expiry, stop and ask the user to review.',
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -141,21 +141,20 @@ export const agentTools: Tool[] = [
             destinationNetwork: { type: Type.STRING },
             recipientAddress: { type: Type.STRING },
             refundAddress: { type: Type.STRING },
-            quoteId: { type: Type.STRING },
+            quoteId: { type: Type.STRING, description: 'The exact preview quote ID from the current session. Omit only when using the active session preview.' },
           },
-          required: ['sourceAsset', 'destinationAsset', 'amount', 'recipientAddress'],
         },
       },
       {
         name: 'confirm_transaction',
-        description: 'Confirm a previously prepared payment after wallet authorization is available.',
+        description: 'Call only after the user explicitly confirms the displayed prepared-transfer terms. Returns the exact Privy wallet transaction action for the frontend to show and authorize; it does not broadcast a transaction.',
         parameters: {
           type: Type.OBJECT,
           properties: {
-            paymentId: { type: Type.STRING, description: 'ID of the prepared payment attempt to confirm.' },
+            transferId: { type: Type.STRING, description: 'ID of the prepared general swap transfer. Omit only when using the active transfer in session memory.' },
             confirm: { type: Type.BOOLEAN, description: 'Must be true to explicitly authorize the payment.' },
           },
-          required: ['paymentId', 'confirm'],
+          required: ['confirm'],
         },
       },
       {

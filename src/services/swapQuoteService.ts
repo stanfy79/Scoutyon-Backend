@@ -1,4 +1,5 @@
 import { isAddress } from 'viem';
+import { config } from '../config.js';
 import type { NearIntentToken } from './nearIntents.js';
 import { previewQuote } from './nearIntents.js';
 
@@ -21,6 +22,7 @@ export interface LiveSwapQuotePreview {
   minAmountOut: string | null;
   expiresAt: Date | null;
   timeEstimateSeconds: number | null;
+  providerResponse: Record<string, unknown>;
 }
 
 export class SwapQuoteInputError extends Error {
@@ -135,6 +137,7 @@ function extractLiveQuote(payload: unknown): LiveSwapQuotePreview {
     timeEstimateSeconds: typeof timeEstimate === 'number' && Number.isFinite(timeEstimate) && timeEstimate >= 0
       ? timeEstimate
       : null,
+    providerResponse: payload,
   };
 }
 
@@ -206,9 +209,11 @@ export async function requestLiveSwapQuote(input: {
   const response = await previewQuote({
     swapType: 'EXACT_INPUT',
     originAsset: sourceToken.assetId,
-    ...(normalizedBlockchain(sourceToken.blockchain) === 'stellar' && { depositMode: 'MEMO' }),
+    depositType: 'ORIGIN_CHAIN',
     destinationAsset: destinationToken.assetId,
     amount: amountAtomic,
+    slippageTolerance: config.PAYMENT_SLIPPAGE_BPS,
+    deadline: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     recipient,
     recipientType: 'DESTINATION_CHAIN',
     refundTo,
