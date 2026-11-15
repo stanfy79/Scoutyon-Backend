@@ -1,6 +1,6 @@
 # Scoutyon — Backend
 
-## Frontend repository: (https://github.com/stanfy79/Scoutyon)[https://github.com/stanfy79/Scoutyon]
+## Frontend repository: [https://github.com/stanfy79/Scoutyon](https://github.com/stanfy79/Scoutyon)
 
 **The intelligence and transaction infrastructure powering Scoutyon.**
 
